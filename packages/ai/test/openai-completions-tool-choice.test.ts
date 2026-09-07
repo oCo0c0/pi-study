@@ -423,7 +423,7 @@ describe("openai-completions tool_choice", () => {
 			model,
 			{
 				messages: [
-					{ role: "user", content: "Read README.md", timestamp: Date.now() },
+					{ role: "user", content: "Read README-PI.md", timestamp: Date.now() },
 					assistantMessage,
 					toolResult,
 					{ role: "user", content: "Continue", timestamp: Date.now() },
@@ -694,7 +694,7 @@ describe("openai-completions tool_choice", () => {
 									index: 0,
 									id: "call_1",
 									type: "function",
-									function: { name: "read", arguments: '{"path":"README.md"}' },
+									function: { name: "read", arguments: '{"path":"README-PI.md"}' },
 									custom: {},
 								},
 							],
@@ -715,7 +715,7 @@ describe("openai-completions tool_choice", () => {
 		const response = await streamSimple(
 			model,
 			{
-				messages: [{ role: "user", content: "Read README.md", timestamp: Date.now() }],
+				messages: [{ role: "user", content: "Read README-PI.md", timestamp: Date.now() }],
 				tools: [tool],
 			},
 			{ apiKey: "test" },
@@ -810,7 +810,7 @@ describe("openai-completions tool_choice", () => {
 				messages: [
 					{
 						role: "user",
-						content: "Read README.md",
+						content: "Read README-PI.md",
 						timestamp: Date.now(),
 					},
 				],
@@ -1211,7 +1211,7 @@ describe("openai-completions tool_choice", () => {
 			model,
 			{
 				messages: [
-					{ role: "user", content: "Read README.md", timestamp: Date.now() },
+					{ role: "user", content: "Read README-PI.md", timestamp: Date.now() },
 					assistantMessage,
 					toolResult,
 				],

@@ -111,7 +111,7 @@ Restart pi, or run `/reload`, after changing context files.
 Type `@` in the editor to fuzzy-search files, or pass files on the command line:
 
 ```bash
-pi @README.md "Summarize this"
+pi @README-PI.md "Summarize this"
 pi @src/app.ts @src/app.test.ts "Review these together"
 ```
 
@@ -150,7 +150,7 @@ For one-shot prompts:
 
 ```bash
 pi -p "Summarize this codebase"
-cat README.md | pi -p "Summarize this text"
+cat README-PI.md | pi -p "Summarize this text"
 pi -p @screenshot.png "What's in this image?"
 ```
 

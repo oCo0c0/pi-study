@@ -89,7 +89,7 @@ function toolCallChunk(): unknown {
 				index: 0,
 				id: "call_1",
 				type: "function",
-				function: { name: "read", arguments: '{"path":"README.md"}' },
+				function: { name: "read", arguments: '{"path":"README-PI.md"}' },
 			},
 		],
 	});

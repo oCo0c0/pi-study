@@ -269,7 +269,7 @@ describe("ToolExecutionComponent parity", () => {
 		const rendered = stripAnsi(component.render(120).join("\n"));
 		expect(rendered).toContain("override call");
 		expect(rendered).toContain("override result");
-		expect(rendered).not.toContain("read README.md");
+		expect(rendered).not.toContain("read README-PI.md");
 	});
 
 	test("uses custom renderers for built-in overrides that reuse wrapped built-in tool parameters", () => {
@@ -491,7 +491,7 @@ describe("ToolExecutionComponent parity", () => {
 			title: "Pi documentation",
 			path: getReadmePath(),
 			content: "Hidden docs content",
-			compact: "read docs README.md",
+			compact: "read docs README-PI.md",
 			hidden: "Hidden docs content",
 			absent: undefined,
 		},
@@ -526,7 +526,7 @@ describe("ToolExecutionComponent parity", () => {
 
 	for (const scenario of [
 		{ title: "SKILL.md", path: join(process.cwd(), "attio", "SKILL.md"), compact: "[skill] attio:120-329" },
-		{ title: "Pi documentation", path: getReadmePath(), compact: "read docs README.md:120-329" },
+		{ title: "Pi documentation", path: getReadmePath(), compact: "read docs README-PI.md:120-329" },
 	] as const) {
 		test(`shows the read line range in compact ${scenario.title} reads before the expand hint`, () => {
 			const component = new ToolExecutionComponent(

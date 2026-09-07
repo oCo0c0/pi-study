@@ -1,3 +1,20 @@
+/**
+ * 【中文导读】上下文压缩（compaction）：把旧历史交给 LLM 压成结构化摘要，
+ * 替换旧历史以腾出上下文窗口；原始历史不删除（存在会话树里可回看/回退）。
+ *
+ * 四步流程：
+ *   ① 何时压：estimateContextTokens（usage 锚点+尾部估算）+ shouldCompact
+ *             （tokens > 窗口 - reserveTokens，默认留 16384 余量）
+ *   ② 在哪切：findCutPoint（从尾部保 20000 token 回退到合法切点；
+ *             toolResult 前不能切；切在 turn 中间 = split turn）
+ *   ③ 怎么摘：prepareCompaction（切三段）→ compact（LLM 生成六段式结构摘要，
+ *             有旧摘要走增量更新；split turn 的前缀单独摘要再拼接）
+ *   ④ 怎么用：CompactResult 存为会话树的 compaction Entry；下次
+ *             buildSessionContext 时 [摘要+retainedTail] 整体替换旧历史
+ *
+ * 本文件错误处理用 Result<T,CompactionError>（ok/err 值语义，非异常）。
+ * 逐段中文讲解见仓库根目录：代码导读/04-compaction.md
+ */
 import {
 	type Api,
 	type AssistantMessage,
@@ -155,6 +172,8 @@ export interface CompactionSettings {
 }
 
 /** Default compaction settings used by the harness. */
+// 中文：reserveTokens=触发余量（给下一轮回复留空间）；keepRecentTokens=压缩后
+// 保留的近期 token（太少丢工作细节，太多压缩收益低）。
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	enabled: true,
 	reserveTokens: 16384,
@@ -213,6 +232,8 @@ function getLastAssistantUsageInfo(messages: AgentMessage[]): { usage: Usage; in
 }
 
 /** Estimate context tokens for messages using provider usage when available. */
+// 中文：锚点+尾部估算——provider 的 usage 是精确值，找到最近一条可信 usage
+// 当锚点，只估算其后的"尾巴"。误差被限制在最近几条消息内，不随会话变长累积。
 export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEstimate {
 	const usageInfo = getLastAssistantUsageInfo(messages);
 
@@ -244,6 +265,8 @@ export function estimateContextTokens(messages: AgentMessage[]): ContextUsageEst
 }
 
 /** Return whether context usage exceeds the configured compaction threshold. */
+// 中文：为什么是"窗口-reserve"而不是"窗口"？要给下一轮回复（以及摘要提示词）
+// 留空间，否则触发时这次请求本身就会溢出。
 export function shouldCompact(contextTokens: number, contextWindow: number, settings: CompactionSettings): boolean {
 	if (!settings.enabled) return false;
 	return contextTokens > contextWindow - settings.reserveTokens;
@@ -268,6 +291,9 @@ function estimateTextAndImageContentChars(content: string | Array<{ type: string
 }
 
 /** Estimate token count for one message using a conservative character heuristic. */
+// 中文：4 字符≈1 token（英文经验值；中文实际约 1.5~2 字符/token，所以中文会话
+// 的真实占用会高于估算——这是 reserveTokens 余量存在的另一个原因）。图片按
+// 4800 字符估。
 export function estimateTokens(message: AgentMessage): number {
 	let chars = 0;
 
@@ -309,6 +335,9 @@ export function estimateTokens(message: AgentMessage): number {
 
 	return 0;
 }
+// 中文：合法切点规则——只能切在 user/assistant/custom 等消息边界；
+// toolResult 前面绝对不能切：那会产生"孤儿 toolResult"（前面没有对应的
+// assistant 工具调用），provider 会直接拒绝请求。
 function findValidCutPoints(entries: Entry[], startIndex: number, endIndex: number): number[] {
 	const cutPoints: number[] = [];
 	for (let i = startIndex; i < endIndex; i++) {
@@ -371,6 +400,9 @@ export interface CutPointResult {
 }
 
 /** Find the compaction cut point that keeps approximately the requested recent-token budget. */
+// 中文：从最新往最旧累计 token，攒够 keepRecentTokens 后把切点往前对齐到
+// 最近合法边界。若切点不在 user 消息上（turn 边界），标记 split turn 并找到
+// 该 turn 的起点——前缀将单独摘要（见 compact）。
 export function findCutPoint(
 	entries: Entry[],
 	startIndex: number,
@@ -425,6 +457,9 @@ export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assi
 
 Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
 
+// 中文：首次摘要提示词。关键设计：①"读者是另一个 LLM"——摘要是接力棒不是
+// 会议纪要；②固定六段格式（Goal/约束/进度三栏/决策/下一步/关键上下文）；
+// ③硬要求精确保留文件路径、函数名、错误信息——丢了精确字符串后续必翻车。
 const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 
 Use this EXACT format:
@@ -458,6 +493,8 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
+// 中文：增量更新提示词——不是重新摘要一切，而是在旧摘要上"打补丁"
+// （PRESERVE/ADD/UPDATE 规则），省 token 且格式稳定。
 const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
 
 Update the existing structured summary with new information. RULES:
@@ -526,6 +563,9 @@ export async function generateSummary(
 }
 
 /** Generate or update a conversation summary and return its provider usage. */
+// 中文：摘要请求做了隔离（cacheRetention:none + 全新 sessionId，见
+// completeSimpleWithRetries）；对话全文包 <conversation>、旧摘要包
+// <previous-summary> 标签传入；输出上限 = reserveTokens 的 80%。
 export async function generateSummaryWithUsage(
 	currentMessages: AgentMessage[],
 	models: Models,
@@ -613,6 +653,9 @@ export interface CompactionPreparation {
 }
 
 /** Prepare session entries for compaction, or return undefined when compaction is not applicable. */
+// 中文：纯函数（不调 LLM）。最巧的一段：第二次压缩时，把上次 compaction 的
+// retainedTail 还原成【虚拟 entry】拼回序列——上次保留的尾巴也能被正常
+// 切分/摘要，算法不需要为"多次压缩"写特例。
 export function prepareCompaction(
 	pathEntries: Entry[],
 	settings: CompactionSettings,
@@ -704,6 +747,8 @@ Be concise. Focus on what's needed to understand the kept suffix.`;
 export { serializeConversation } from "./utils.ts";
 
 /** Generate compaction summary data from prepared session history. */
+// 中文：编排函数。split turn 时两次 LLM 调用（历史摘要 + turn 前缀摘要）后
+// 拼接；最后把文件清单（跨代继承的读过/改过列表）追加进摘要。
 export async function compact(
 	preparation: CompactionPreparation,
 	models: Models,

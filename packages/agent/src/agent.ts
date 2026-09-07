@@ -1,3 +1,17 @@
+/**
+ * 【中文导读】Agent 类：低层 agentLoop 的有状态包装，生产环境用这一层。
+ *
+ * 与裸 agentLoop 的本质区别——事件屏障：循环的每个事件先在这里 reduce 内部
+ * 状态，再按订阅顺序 await 每个监听者；监听者（含 agent_end 的落盘）全部
+ * 完成后，prompt() 返回的 Promise 才 resolve。裸流只是"观察"，Agent 才保证
+ * "await prompt() 返回时会话已完整落盘"。
+ *
+ * 双数组设计：循环持有 createContextSnapshot() 的快照数组（运行期自由变更，
+ * 流式半成品就占槽位）；本类的 _state.messages 只在 message_end 事件时追加
+ * （外部观察者永远看到一致状态）。
+ *
+ * 逐段中文讲解见仓库根目录：代码导读/02-agent.md
+ */
 import type {
 	ImageContent,
 	Message,
@@ -122,6 +136,10 @@ export interface AgentOptions {
 	toolExecution?: ToolExecutionMode;
 }
 
+// steering / follow-up 共用的消息队列。两种排空模式：
+//   "one-at-a-time"（默认）：每个注入点只送最旧一条——用户连插三句，
+//                            agent 每个回合只"听到"第一句，处理完再听下一句；
+//   "all"：全部一起注入上下文。
 class PendingMessageQueue {
 	private messages: AgentMessage[] = [];
 	public mode: QueueMode;
@@ -170,6 +188,10 @@ type ActiveRun = {
  * `Agent` owns the current transcript, emits lifecycle events, executes tools,
  * and exposes queueing APIs for steering and follow-up messages.
  */
+// 中文：三种"干预"API 的语义区分——
+//   prompt()：新任务（运行中调用直接抛错，不排队）；
+//   steer()：运行中插话，当前批工具执行完、下次调 LLM 前注入；
+//   followUp()：追发，等 agent 本来要停时才注入并再跑一轮。
 export class Agent {
 	private _state: MutableAgentState;
 	private readonly listeners = new Set<(event: AgentEvent, signal: AbortSignal) => Promise<void> | void>();
@@ -247,6 +269,7 @@ export class Agent {
 	 * `agent_end` is the final emitted event for a run, but the agent does not
 	 * become idle until all awaited listeners for that event have settled.
 	 */
+	// 中文：监听者按订阅顺序被 await，且算进运行结算——这是事件屏障的入口。
 	subscribe(listener: (event: AgentEvent, signal: AbortSignal) => Promise<void> | void): () => void {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
@@ -348,6 +371,8 @@ export class Agent {
 	async prompt(message: AgentMessage | AgentMessage[]): Promise<void>;
 	async prompt(input: string, images?: ImageContent[]): Promise<void>;
 	async prompt(input: string | AgentMessage | AgentMessage[], images?: ImageContent[]): Promise<void> {
+		// 中文：运行中再 prompt 直接抛错（不静默排队）——错误信息本身在教育
+		// 调用者改用 steer()/followUp()。三个 API 语义分明，避免歧义。
 		if (this.activeRun) {
 			throw new Error(
 				"Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.",
@@ -358,6 +383,8 @@ export class Agent {
 	}
 
 	/** Continue from the current transcript. The last message must be a user or tool-result message. */
+	// 中文：continue 的特殊分支——最后一条是 assistant（上轮正常结束）但队列里
+	// 还有话没说时，把排队的消息当新 prompt 跑（skipInitialSteeringPoll 防重复注入）。
 	async continue(): Promise<void> {
 		if (this.activeRun) {
 			throw new Error("Agent is already processing. Wait for completion before continuing.");
@@ -434,6 +461,8 @@ export class Agent {
 		});
 	}
 
+	// 中文：给循环的是快照（slice 拷贝），不是内部状态的引用。循环改它自己的
+	// 副本；新消息最终通过 message_end 事件回流到 _state.messages（双数组设计）。
 	private createContextSnapshot(): AgentContext {
 		return {
 			systemPrompt: this._state.systemPrompt,
@@ -442,6 +471,10 @@ export class Agent {
 		};
 	}
 
+	// 中文：把自身状态编译成 AgentLoopConfig。steering/follow-up 队列通过
+	// getSteeringMessages/getFollowUpMessages 回调暴露给循环——循环不认识
+	// 队列类本身（依赖倒置）。skipInitialSteeringPoll 是闭包标志：continue()
+	// 已把队列消息 drain 出来当 prompt 传入了，跳过循环开头的首次轮询防重复。
 	private createLoopConfig(options: { skipInitialSteeringPoll?: boolean } = {}): AgentLoopConfig {
 		let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
 		const shouldStopAfterTurn = this.shouldStopAfterTurn;
@@ -483,6 +516,10 @@ export class Agent {
 		};
 	}
 
+	// 中文：一次运行的生命周期外壳。屏障链路：prompt() 被 await → await executor
+	// → 循环每个事件 await emit（= processEvents：reduce 状态 + await 全部监听者）
+	// → agent_end 监听者（如会话落盘）完成 → finishRun() resolve promise →
+	// prompt() 的 await 才返回。
 	private async runWithLifecycle(executor: (signal: AbortSignal) => Promise<void>): Promise<void> {
 		if (this.activeRun) {
 			throw new Error("Agent is already processing.");
@@ -508,6 +545,9 @@ export class Agent {
 		}
 	}
 
+	// 中文：循环漏出的异常兜底——手工合成一条 stopReason 为 error/aborted 的
+	// assistant 消息，走完整事件序列（start→end→turn_end→agent_end）。这样
+	// 监听者无论循环怎么死，看到的都是格式完整的事件流，无需写特例。
 	private async handleRunFailure(error: unknown, aborted: boolean): Promise<void> {
 		const failureMessage = {
 			role: "assistant",
@@ -541,6 +581,9 @@ export class Agent {
 	 * considered idle later, after all awaited listeners for `agent_end` finish
 	 * and `finishRun()` clears runtime-owned state.
 	 */
+	// 中文：事件屏障的两阶段——先按事件类型 reduce 内部状态（message_end 才把
+	// 消息追加进 _state.messages；流式半成品放 streamingMessage），再按订阅
+	// 顺序 await 每个监听者。pendingToolCalls 用 copy-on-write（新 Set 拷贝再改）。
 	private async processEvents(event: AgentEvent): Promise<void> {
 		switch (event.type) {
 			case "message_start":

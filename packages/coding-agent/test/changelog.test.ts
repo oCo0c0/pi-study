@@ -11,10 +11,10 @@ const entry: ChangelogEntry = {
 describe("normalizeChangelogLinks", () => {
 	test("rewrites package-relative changelog links to tag-pinned GitHub source links", () => {
 		const markdown = [
-			"[Project Trust](README.md#project-trust)",
+			"[Project Trust](README-PI.md#project-trust)",
 			"[Extensions](docs/extensions.md#project_trust)",
 			"[Examples](examples/extensions/)",
-			"[Root README](../../README.md#supply-chain-hardening)",
+			"[Root README](../../README-PI.md#supply-chain-hardening)",
 		].join("\n");
 
 		expect(normalizeChangelogLinks(markdown, entry)).toBe(

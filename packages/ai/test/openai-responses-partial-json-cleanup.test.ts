@@ -37,7 +37,7 @@ async function* createFunctionCallEvents(argumentsJson: string): AsyncIterable<R
 	} as ResponseStreamEvent;
 	yield {
 		type: "response.function_call_arguments.delta",
-		delta: '{"path":"README.md"',
+		delta: '{"path":"README-PI.md"',
 	} as ResponseStreamEvent;
 	yield {
 		type: "response.function_call_arguments.delta",
@@ -81,7 +81,7 @@ describe("openai responses partialJson cleanup", () => {
 		const output = createOutput(model);
 		const stream = new AssistantMessageEventStream();
 		const pushSpy = vi.spyOn(stream, "push");
-		const argumentsJson = '{"path":"README.md","content":"updated"}';
+		const argumentsJson = '{"path":"README-PI.md","content":"updated"}';
 
 		await processResponsesStream(createFunctionCallEvents(argumentsJson), output, stream, model);
 

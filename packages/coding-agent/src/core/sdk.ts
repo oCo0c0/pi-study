@@ -1,3 +1,15 @@
+/**
+ * 【中文导读】pi CLI 的组合根（composition root）：把 ModelRuntime、设置、
+ * 会话管理、资源加载、内置工具、扩展系统全部装配起来，new Agent(...) 并包
+ * 进 AgentSession。examples/sdk/ 的 13 个示例都以本文件的
+ * createAgentSession() 为入口。
+ *
+ * 装配线：路径解析 → 四大基础设施 → 模型三级解析链（显式指定 → 会话恢复
+ * → 设置默认）→ thinkingLevel 解析链 → 工具名单 → new Agent（注入全部策略）
+ * → 恢复历史消息 → new AgentSession（产品级门面）。
+ *
+ * 逐段中文讲解见仓库根目录：代码导读/05-sdk.md
+ */
 import { join } from "node:path";
 import { Agent, type AgentMessage, setDefaultStreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { clampThinkingLevel, type Message, type Model, streamSimple } from "@earendil-works/pi-ai/compat";
@@ -34,6 +46,8 @@ import {
 // Preserve the pre-0.81 fallback for extensions that construct Agent instances
 // or invoke low-level agent loops without supplying streamFn. Agent core remains
 // provider-agnostic and does not import pi-ai/compat itself.
+// 中文：边界决策——agent 核心坚持不依赖任何 provider 实现，默认流函数由
+// 第一个加载的宿主（pi CLI）在这里注册。
 setDefaultStreamFn(streamSimple);
 
 export interface CreateAgentSessionOptions {
@@ -171,6 +185,9 @@ function getDefaultAgentDir(): string {
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
+	// 中文：基本节奏是依赖注入——每个基础设施都是"传了就用你的，没传就造默认"。
+	// systemPrompt 和 tools 故意留空：它们的最终内容依赖扩展加载结果，
+	// 由 AgentSession 组装（谁拥有最终信息，谁负责填）。
 	const cwd = resolvePath(options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd());
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	let resourceLoader = options.resourceLoader;
@@ -197,6 +214,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let modelFallbackMessage: string | undefined;
 
 	// If session has data, try to restore model from it
+	// 中文：模型三级解析链 = 显式指定 → 会话保存的 → findInitialModel（设置默认
+	// → 可用 provider 默认）。每级失败都不抛异常，最终一定给出可用模型或一条
+	// 引导用户登录的 modelFallbackMessage（产品级容错）。
 	if (!model && hasExistingSession && existingSession.model) {
 		const restoredModel = modelRuntime.getModel(existingSession.model.provider, existingSession.model.modelId);
 		if (restoredModel && modelRuntime.hasConfiguredAuth(restoredModel.provider)) {
@@ -265,6 +285,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let agent: Agent;
 
 	// Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
+	// 中文：每次调用【动态】读设置——会话中途改设置立即生效，而非启动时固化。
 	const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {
 		const converted = convertToLlm(messages);
 		// Check setting dynamically so mid-session changes take effect
@@ -301,8 +322,15 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		});
 	};
 
+	// 中文：解决装配顺序矛盾（鸡生蛋）——new Agent 的 streamFn 闭包需要调用
+	// 扩展事件，但 ExtensionRunner 在 AgentSession 构造时才创建。闭包捕获这个
+	// 可变引用盒子，之后 AgentSession 把 runner 填进 current。单线程事件循环
+	// 下普通对象就够，无需并发安全结构。
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
+	// 中文：核心装配点。streamFn 是最厚的包装层（洋葱式）：每次调用动态读
+	// 重试/超时设置（热更新友好），transformHeaders 里合并归因头并给扩展
+	// before_provider_headers 事件机会，onPayload/onResponse 桥接扩展事件。
 	agent = new Agent({
 		initialState: {
 			systemPrompt: "",
@@ -316,6 +344,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			const httpIdleTimeoutMs = settingsManager.getHttpIdleTimeoutMs();
 			// SDKs treat timeout=0 as 0ms (immediate timeout), not "no timeout".
 			// Use max int32 to effectively disable the timeout.
+			// 中文：SDK 把 0 当"0 毫秒立即超时"，所以"禁用超时"要用 int32 最大值表达。
 			const effectiveTimeoutMs = httpIdleTimeoutMs === 0 ? 2147483647 : httpIdleTimeoutMs;
 			const timeoutMs = options?.timeoutMs ?? providerRetrySettings.timeoutMs ?? effectiveTimeoutMs;
 			const websocketConnectTimeoutMs =
@@ -385,6 +414,10 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		sessionManager.appendThinkingLevelChange(thinkingLevel);
 	}
 
+	// 中文：最终包装。AgentSession 是产品级门面：steering/followUp 编排、自动
+	// 压缩（manual/threshold/overflow 三触发）、系统提示词重建（工具启停联动）、
+	// 工具注册表（内置+扩展）、扩展绑定都在它里面。注意 extensionRunnerRef
+	// 传进去——创建 runner 后填 current，上面的闭包随即生效。
 	const session = new AgentSession({
 		agent,
 		sessionManager,

@@ -144,7 +144,7 @@ describe("CombinedAutocompleteProvider", () => {
 			const result = await getSuggestions(provider, [line], 0, line.length);
 
 			const values = result?.items.map((item) => item.value).sort();
-			assert.deepStrictEqual(values, ["@README.md", "@src/"].sort());
+			assert.deepStrictEqual(values, ["@README-PI.md", "@src/"].sort());
 		});
 
 		test("matches file with extension in query", async () => {
@@ -175,7 +175,7 @@ describe("CombinedAutocompleteProvider", () => {
 			const result = await getSuggestions(provider, [line], 0, line.length);
 
 			const values = result?.items.map((item) => item.value).sort();
-			assert.deepStrictEqual(values, ["@README.md"]);
+			assert.deepStrictEqual(values, ["@README-PI.md"]);
 		});
 
 		test("ranks directories before files", async () => {

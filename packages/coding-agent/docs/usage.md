@@ -179,7 +179,7 @@ See [Pi Packages](packages.md) for package sources and security notes.
 In print mode, pi also reads piped stdin and merges it into the initial prompt:
 
 ```bash
-cat README.md | pi -p "Summarize this text"
+cat README-PI.md | pi -p "Summarize this text"
 ```
 
 ### Model Options
@@ -278,7 +278,7 @@ pi -p "Summarize this codebase"
 pi -p -- "- Summarize these points"
 
 # Non-interactive with piped stdin
-cat README.md | pi -p "Summarize this text"
+cat README-PI.md | pi -p "Summarize this text"
 
 # Named one-shot session
 pi --name "release audit" -p "Audit this repository"

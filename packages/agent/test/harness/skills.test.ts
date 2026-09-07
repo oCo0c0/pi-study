@@ -118,7 +118,7 @@ Use this skill.
 		const root = createTempDir();
 		const env = new NodeExecutionEnv({ cwd: root });
 		await env.createDir("skills/nested-skill", { recursive: true });
-		await env.writeFile("skills/README.md", "# Shared skills\n\nDocumentation.");
+		await env.writeFile("skills/README-PI.md", "# Shared skills\n\nDocumentation.");
 		await env.writeFile("skills/AGENTS.md", "# Agent notes\n\nDocumentation.");
 		await env.writeFile("skills/CLAUDE.md", "---\ndescription: [invalid\n---\n\nDocumentation.");
 		await env.writeFile("skills/root.md", "---\ndescription: Root skill\n---\nRoot content");

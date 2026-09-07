@@ -1,5 +1,43 @@
 # Development Rules
 
+## Repository Overview
+
+The pi agent harness monorepo: npm workspaces, TypeScript (ESM, Node >= 22.19), packages published under the `@earendil-works/*` scope. The core product is `pi`, a self-extensible coding agent CLI, built on the libraries below it. All packages share one version (lockstep versioning; see Releasing).
+
+Packages, in the order the root `build` script compiles them. This is dependency order: each package depends only on packages listed above it.
+
+| Path | npm name | Role |
+| --- | --- | --- |
+| `packages/tui` | `@earendil-works/pi-tui` | Terminal UI library with differential rendering |
+| `packages/telemetry` | `@earendil-works/pi-telemetry` | Vendor-neutral telemetry contracts and typed schemas |
+| `packages/ai` | `@earendil-works/pi-ai` | Unified multi-provider LLM API (OpenAI, Anthropic, Google, ...) with a generated model catalog |
+| `packages/agent` | `@earendil-works/pi-agent-core` | Agent runtime: tool calling, state management, sessions |
+| `packages/session-backends/sqlite-node` | `@earendil-works/pi-session-backend-sqlite-node` | SQLite session backend for Node |
+| `packages/protocol` | `@earendil-works/pi-protocol` | Transport-neutral CBOR protocol for remote pi sessions |
+| `packages/client` | `@earendil-works/pi-client` | Client for remote pi sessions (framed CBOR) |
+| `packages/server` | `@earendil-works/pi-server` | Experimental server for remote pi sessions |
+| `packages/coding-agent` | `@earendil-works/pi-coding-agent` | The `pi` CLI itself: read/bash/edit/write tools, session management, extensions |
+| `packages/evals` | `@earendil-works/pi-evals` (private) | Eval harness, run with `npm run eval` |
+
+Other locations:
+
+- `scripts/` — root build, check, and release tooling invoked by the root `package.json` scripts.
+- `packages/coding-agent/docs/` — per-area documentation (`extensions.md`, `providers.md`, `custom-provider.md`, `session-format.md`, `rpc.md`, `sdk.md`, `security.md`, `windows.md`, ...). Read the matching doc before changing one of these areas.
+- `packages/coding-agent/examples/extensions/` — working extension examples; these are also npm workspaces.
+- `.pi/` — pi's own configuration for developing pi in this repo: local extensions (`.pi/extensions/`), prompts (`.pi/prompts/cl.md` is the `/cl` changelog audit prompt referenced in Releasing; `is.md` is the `/is` issue analysis prompt), and skills.
+- `CONTRIBUTING.md` — contributor gate, quality bar, and the core philosophy.
+
+Architecture boundary: pi's core is minimal by design. If a feature does not belong in the core, it should be an extension (`packages/coding-agent/docs/extensions.md`), not an addition to a core package.
+
+Essential root commands (rules for when agents may run them: see Commands):
+
+- `npm run check` — biome lint/format plus pinned-deps, TS import style, shrinkwrap and install-lock checks, `tsgo --noEmit` typecheck, and browser smoke.
+- `./test.sh` — runs `npm test` in an isolated HOME with no API keys; LLM-dependent tests skip themselves.
+- `./pi-test.sh` (POSIX; `pi-test.bat`/`pi-test.ps1` on Windows) — run pi from sources.
+- `npm run generate:models` — regenerate `packages/ai` model data after editing `packages/ai/scripts/generate-models.ts`.
+
+Provider changes: `packages/ai/test/` is organized per provider (e.g. `anthropic-*.test.ts`, `bedrock-*.test.ts`). Provider changes and new providers require tests there.
+
 ## Conversational Style
 
 - Keep answers short and concise

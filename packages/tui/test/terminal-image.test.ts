@@ -694,7 +694,7 @@ describe("hyperlink", () => {
 
 	it("works with file:// URIs", () => {
 		const result = hyperlink("README.md", "file:///home/user/README.md");
-		assert.ok(result.includes("file:///home/user/README.md"));
+		assert.ok(result.includes("file:///home/user/README-PI.md"));
 		assert.ok(result.includes("README.md"));
 	});
 });

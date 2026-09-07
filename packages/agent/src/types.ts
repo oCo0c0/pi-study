@@ -1,3 +1,14 @@
+/**
+ * 【中文导读】agent 运行时的全部核心类型（"宪法"文件——无一行运行时逻辑，
+ * 但定义了循环怎么调 LLM、工具长什么样、有哪些钩子、发哪些事件）。
+ *
+ * 阅读地图：StreamFn（调 LLM 的唯一抽象）→ AgentLoopConfig（循环全部钩子）
+ * → CustomAgentMessages/AgentMessage（可扩展消息模型，declaration merging）
+ * → AgentState/AgentContext（状态 vs 快照）→ AgentTool/AgentToolResult（工具契约）
+ * → AgentEvent（事件协议，判别联合）。
+ *
+ * 每个类型的详细中文讲解见仓库根目录：代码导读/03-agent-types.md
+ */
 import type {
 	Api,
 	AssistantMessage,
@@ -15,6 +26,8 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { Static, TSchema } from "typebox";
 
+// 中文：整个"传输无关"设计的支点——循环只认识这个函数签名，不认识
+// HTTP/SSE/provider。测试假实现、浏览器代理、pi-ai 标准实现都可替换进来。
 /**
  * Stream function used by the agent loop. `Models.streamSimple` satisfies
  * this shape.
@@ -146,6 +159,14 @@ export interface AgentLoopTurnUpdate {
 
 export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {}
 
+// 中文：循环的全部可插拔点（除 model 外都是钩子）：
+//   convertToLlm（必填）/ transformContext —— 上下文两段转换
+//   getApiKey —— 每次调用动态解析 key（支持会过期的 OAuth token）
+//   shouldStopAfterTurn —— 优雅停止（压缩触发点）
+//   prepareNextTurn —— 下一轮前替换 context/model/thinking
+//   getSteeringMessages / getFollowUpMessages —— 两个队列的轮询
+//   beforeToolCall / afterToolCall —— 工具拦截与结果改写
+// 注意每个钩子的契约都要求"不许 throw"。
 export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
 
@@ -300,6 +321,11 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
  */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+// 中文：declaration merging（声明合并）——TS 里同名 interface 的声明自动合并，
+// 应用在自己代码里 declare module 即可"往这个接口加字段"，编译期 AgentMessage
+// 联合类型自动扩展。类型系统就是注册中心，无需运行时注册。
+// 代价：自定义消息只存在于类型层面，必须由你提供的 convertToLlm 决定怎么
+// 呈现给 LLM（默认实现会把它们全部过滤掉）。
 /**
  * Extensible interface for custom app messages.
  * Apps can extend via declaration merging:
@@ -323,6 +349,8 @@ export interface CustomAgentMessages {
  * This abstraction allows apps to add custom message types while maintaining
  * type safety and compatibility with the base LLM messages.
  */
+// 中文：内部富消息 = 标准消息 + 自定义消息的联合。"内部表示丰富、对外协议
+// 收敛"——只在调 LLM 的边界由 convertToLlm 转成标准三角色。
 export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
 
 /**
@@ -331,6 +359,8 @@ export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessag
  * `tools` and `messages` use accessor properties so implementations can copy
  * assigned arrays before storing them.
  */
+// 中文：与 AgentContext（一次运行的输入快照）区分——State 是 Agent 类的长期
+// 状态，含运行时标志（isStreaming/pendingToolCalls 等）。
 export interface AgentState {
 	/** System prompt sent with each model request. */
 	systemPrompt: string;
@@ -359,6 +389,9 @@ export interface AgentState {
 }
 
 /** Final or partial result produced by a tool. */
+// 中文：content 会发给模型（进上下文）；details 只给 UI/日志（不进上下文）。
+// addedToolNames 是 deferred tools 机制的钩子；terminate 只有批内全部为 true
+// 才真正提前终止。
 export interface AgentToolResult<T> {
 	/** Text or image content returned to the model. */
 	content: (TextContent | ImageContent)[];
@@ -384,6 +417,8 @@ export interface AgentToolResult<T> {
 export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;
 
 /** Tool definition used by the agent runtime. */
+// 中文：Static<TParameters> 是"从 TypeBox schema 反推出的参数类型"——运行时
+// 校验和编译期类型共享同一份 schema 定义。失败要 throw（见 execute 注释）。
 export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any> extends Tool<TParameters> {
 	/** Human-readable label for UI display. */
 	label: string;
@@ -419,6 +454,8 @@ export interface AgentContext {
 	tools?: AgentTool<any>[];
 }
 
+// 中文：嵌套事件树 agent_start → (turn_start → message_* / tool_execution_* →
+// turn_end)* → agent_end。UI/持久化/扩展全部是这棵树的订阅者。
 /**
  * Events emitted by the Agent for UI updates.
  *

@@ -360,7 +360,7 @@ export function getUpdateInstruction(packageName: string): string {
 // =============================================================================
 
 /**
- * Get the base directory for resolving package assets (themes, package.json, README.md, CHANGELOG.md).
+ * Get the base directory for resolving package assets (themes, package.json, README-PI.md, CHANGELOG.md).
  * - For Bun binary: returns the directory containing the executable
  * - For Node.js and tsx: returns the package root containing package.json
  * - Ignores Bun binary metadata copied into dist/ when the package root is available
@@ -432,7 +432,7 @@ export function getPackageJsonPath(): string {
 	return join(getPackageDir(), "package.json");
 }
 
-/** Get path to README.md */
+/** Get path to README-PI.md */
 export function getReadmePath(): string {
 	return resolve(join(getPackageDir(), "README.md"));
 }
